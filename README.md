@@ -1,4 +1,4 @@
-# RaspiVWS: Raspberry Pi VLC Webcam Streaming, with Logitech C920 USB webcam
+# RaspiVWS: Raspberry Pi VLC Webcam Streaming, with Logitech C920 USB webcam (v1.0)
 ![](https://img.shields.io/static/v1?label=Patreon&message=Donate&color=0079C1&logo=patreon&link=https://www.patreon.com/bePatron?u=38268348)
 ![](https://img.shields.io/static/v1?label=PayPal&message=Donate&color=0079C1&logo=paypal&link=https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=lonewandererdev%40gmail.com&item_name=Develop+%26+maintain+somme+addons/softwares+on+my+spare+time&currency_code=EUR&source=url)
 
@@ -27,7 +27,7 @@ Everything is documented [in my Stack Overflow question](https://stackoverflow.c
 3. [Usage](#Usage)
 4. [Access to stream](#AccessToStream)
 5. [Additonal commands](#AdditonalCommands)
-   1. [Wifi](#Wifi)
+   1. [WiFi](#Wifi)
    2. [Planned execution](#PlannedExecution)
 6. [TROUBLESHOOTING](#TROUBLESHOOTING)
 4. [Credits](#Credits)
@@ -43,13 +43,15 @@ To do:
 ## 2. Prerequisites
 You must have :
  1. basic Linux/Unix/Raspbian, Git or Github knowledge to peform the commands below
- 2. a Raspberry Pi 3B+ (other Raspberries may not be supported). See what it is [on the official website<img src="/assets/Raspi-PGB001[1].png" width='5%' height='5%'/>](https://www.raspberrypi.org/)
+ 2. a Raspberry Pi 4 B+ or 3B+. See what it is [on the official website<img src="/assets/Raspi-PGB001[1].png" width='5%' height='5%'/>](https://www.raspberrypi.org/)
  3. A Logitech C920 webcam connected to your Raspberry Pi (USB). It *could* work with other webcam with additional modifications. Please give credit to my work if you do any improvements.
 
 
-You should have `VLC` and `v4l-utils` packages already installed on you Pi. If not, see below:
+You should have `VLC`, `v4l-utils`, and (optionally) `msmtp` packages already installed on your Pi. If not:
  ```
  sudo apt-get install vlc v4l-utils
+ # Optional — only needed for email notifications:
+ sudo apt-get install msmtp
  ```
 See [VLC website ![Get VLC icon](https://images.videolan.org/images/goodies/getvlc.png)](https://www.videolan.org/vlc)
 
@@ -83,7 +85,7 @@ Execute command, eg:
 It should produce a console output similar to this:
 
 ```
-Usage: ./Raspi_VLC_Webcam_Stream.sh [-h|--help] [-o|--output-videos-directory <arg>] [-m|--video-file-name-mask <arg>] [--video-files-split-after <arg>] [--stop-stream-after <arg>] [--(no-)use-ssmtp] [--(no-)force-led-on] [--video-width <arg>] [--video-height <arg>] [-V|--verbose] [-v|--version] <video-device-number> [<http-port>]
+Usage: ./Raspi_VLC_Webcam_Stream.sh [-h|--help] [-o|--output-videos-directory <arg>] [-m|--video-file-name-mask <arg>] [--video-files-split-after <arg>] [--stop-stream-after <arg>] [--(no-)use-msmtp] [--(no-)force-led-on] [--video-width <arg>] [--video-height <arg>] [-V|--verbose] [-v|--version] <video-device-number> [<http-port>]
 
 	<video-device-number>: The video capture device number (webcam) that can be found in /dev. Ex: Put 0 if your device is /dev/video0
 	<http-port>: The HTTP port to be used by VLC to provide the video stream from the video capture device. Default will be 8099 (default: '8099')
@@ -92,7 +94,7 @@ Usage: ./Raspi_VLC_Webcam_Stream.sh [-h|--help] [-o|--output-videos-directory <a
 	-m,--video-file-name-mask: Videos files record name. Files will be generated as: 1970-12-31_%00h00m00s_<yourvalue>  (default: 'Webcam_Stream_Record')
 	--video-files-split-after: Defines the unitary VLC record file duration in seconds. WARNING: Only necessary when output-videos-directory is used (default: '120')
 	--stop-stream-after: Defines the delay after which the VLC record will stop in seconds. WARNING: Only necessary when output-videos-directory is used (default: '10800')
-	--use-ssmtp,--no-use-ssmtp: Send mail using SSMTP command (if exists) indicating start of record (off by default)
+	--use-msmtp,--no-use-msmtp: Send mail using msmtp indicating start of record. Set recipient via WEBCAM_STREAM_MAIL_TO env var. (off by default)
 	--force-led-on,--no-force-led-on: Forces the Logitech C920 LED to be on. (off by default)
 	--video-width: Force video format width. Use at your own risk. (default: '1920')
 	--video-height: Force video format height. Use at your own risk. (default: '1080')
@@ -102,7 +104,7 @@ Usage: ./Raspi_VLC_Webcam_Stream.sh [-h|--help] [-o|--output-videos-directory <a
 <a name="AccessToStream"></a>
 ## 4. Access to stream
 
-On any other device connected to the same network as your pi, you can use VLC to access your RaspberryPi3+ VLC stream at this address:
+On any other device connected to the same network as your Pi, you can use VLC to access the stream at this address:
 
 ```
 vlc http://your-raspberrypi-ip:http-port
@@ -116,15 +118,14 @@ where:
 ## 5. Additional commands, usage example
 
 <a name="Wifi"></a>
-### 5.1 Make RaspberryPi3+ a Wifi access point
- 
-If you have no existing network to connect your Pi to, you can follow [instructions from official RaspberryPi3+ website](https://www.raspberrypi.org/documentation/configuration/wireless/access-point.md)
-This will transform your pi into a wifi access point.
+### 5.1 Make Raspberry Pi a Wifi access point
+
+If you have no existing network to connect your Pi to, you can follow [instructions from the official Raspberry Pi website](https://www.raspberrypi.org/documentation/configuration/wireless/access-point.md) to turn it into a WiFi access point.
 
 <a name="PlannedExecution"></a>
 ### 5.2 Planned execution tips
 
-The following assumes your Pi unix user name is `pi` and that you installed RaspiWVS in your home folder, i.e. the script is located here:
+The following assumes your Pi unix user name is `pi` and that you installed RaspiVWS in your home folder, i.e. the script is located here:
 ```
 /home/pi/RaspiVWS/Raspi_VLC_Webcam_Stream.sh
 ```
@@ -162,7 +163,7 @@ sudo chmod 644 /lib/systemd/system/webcam-stream.service
 chmod +x /home/pi/RaspiVWS/Raspi_VLC_Webcam_Stream.sh
 ```
 
-Allow VLC to be excuted as root:
+Allow VLC to be executed as root:
 ```
 sudo sed -i 's/geteuid/getppid/' /usr/bin/vlc
 ```
@@ -192,17 +193,21 @@ See the `at` command manual for further details.
 <a name="TROUBLESHOOTING"></a>
 ## 6. TROUBLESHOOTING
 
-I recently ran into VLC error after a dist-upgrade:
-```
-VLC media player 2.2.6 Umbrella (revision 2.2.6-0-g1aae78981c)
-[00acb230] pulse audio output error: PulseAudio server connection failure: Connection refused
-```
-The solution I found is to launch VLC in GUI mode and change the default audio device to ALSA (instead of Automatic). I can also be done in command line.
-See the solution found here [VLC issues with PulseAudio](https://www.raspberrypi.org/forums/viewtopic.php?t=29403)
+### Audio: PulseAudio / PipeWire connection failure
 
+The script now uses `pulse://` as the audio input source, which works with PipeWire's PulseAudio compatibility layer (the default audio stack on Raspberry Pi OS Bookworm). If you see a PulseAudio connection error, make sure PipeWire (or PulseAudio) is running for your user session:
 ```
-cvlc -A alsa,none --alsa-audio-device default
+systemctl --user status pipewire pipewire-pulse
 ```
+
+### Email notifications: setting the recipient
+
+Email is sent via `msmtp` (replaces the unmaintained `ssmtp`). Before using `--use-msmtp`, export the recipient address:
+```
+export WEBCAM_STREAM_MAIL_TO=your@email.com
+./Raspi_VLC_Webcam_Stream.sh --use-msmtp 0
+```
+Make sure `msmtp` is configured (`~/.msmtprc`) with your SMTP account details.
 
 <a name="Credits"></a>
 ## 7. Credits
