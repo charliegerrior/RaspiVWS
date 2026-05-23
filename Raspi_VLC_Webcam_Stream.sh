@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # CONSTANTS / DEFAULT VALUES
-readonly version=0.3alpha
+readonly version=1.0
 readonly K_DEFAULT_DEVICE_NB=0
 readonly K_LED_OFF=0
 readonly K_LED_ON=1
@@ -13,6 +13,11 @@ readonly K_DEFAULT_HTTP_PORT=8099
 readonly K_DEFAULT_EACH_MOVIE_DURATION_SEC=120
 readonly K_DEFAULT_GLOBAL_RECORD_TIMEOUT=10800
 readonly K_DEFAULT_FILE_NAME_MASK=Webcam_Stream_Record
+readonly K_DEFAULT_FPS=30
+
+# Set the notification email recipient via environment variable before running.
+# Example: export WEBCAM_STREAM_MAIL_TO=you@example.com
+readonly K_DEFAULT_MAIL_RECIPIENT="${WEBCAM_STREAM_MAIL_TO:-}"
 
 
 #
@@ -29,7 +34,7 @@ readonly K_DEFAULT_FILE_NAME_MASK=Webcam_Stream_Record
 # ARG_OPTIONAL_SINGLE([video-files-split-after],[],[Defines the unitary VLC record file duration in seconds. WARNING: Only necessary when output-videos-directory is used],[$K_DEFAULT_EACH_MOVIE_DURATION_SEC])
 # ARG_OPTIONAL_SINGLE([stop-stream-after],[],[Defines the delay after which the VLC record will stop in seconds. WARNING: Only necessary when output-videos-directory is used],[$K_DEFAULT_GLOBAL_RECORD_TIMEOUT])
 
-# ARG_OPTIONAL_BOOLEAN([use-ssmtp],[],[Send mail using SSMTP command (if exists) indicating start of record])
+# ARG_OPTIONAL_BOOLEAN([use-msmtp],[],[Send mail using msmtp indicating start of record. Set recipient via WEBCAM_STREAM_MAIL_TO env var.])
 # ARG_OPTIONAL_BOOLEAN([force-led-on],[],[Forces the Logitech C920 LED to be on.])
 
 # ARG_OPTIONAL_SINGLE([video-width],[],[Force video format width. Use at your own risk.],[$K_DEFAULT_WIDTH])
@@ -92,13 +97,11 @@ _arg_video_height="$K_DEFAULT_HEIGHT"
 _arg_verbose=0
 
 # Function that prints general usage of the script.
-# This is useful if users asks for it, or if there is an argument parsing error (unexpected / spurious arguments)
-# and it makes sense to remind the user how the script is supposed to be called.
 print_help ()
 {
     printf '\n%s\n' "This command allows to trigger a VLC video HTTP stream, and optionnaly record it to MP4 files."
     printf '\n%s\n\n\n' "User is able to choose record duration and split movies duration."
-    printf 'Usage: %s [-h|--help] [-o|--output-videos-directory <arg>] [-m|--video-file-name-mask <arg>] [--video-files-split-after <arg>] [--stop-stream-after <arg>] [--(no-)use-ssmtp] [--(no-)force-led-on] [--video-width <arg>] [--video-height <arg>] [-V|--verbose] [-v|--version] <video-device-number> [<http-port>]\n\n\n' "$0"
+    printf 'Usage: %s [-h|--help] [-o|--output-videos-directory <arg>] [-m|--video-file-name-mask <arg>] [--video-files-split-after <arg>] [--stop-stream-after <arg>] [--(no-)use-msmtp] [--(no-)force-led-on] [--video-width <arg>] [--video-height <arg>] [-V|--verbose] [-v|--version] <video-device-number> [<http-port>]\n\n\n' "$0"
     printf '\t%s\n' "<video-device-number>: The video capture device number (webcam) that can be found in /dev. Ex: Put 0 if your device is /dev/video0"
     printf '\t%s\n' "<http-port>: The HTTP port to be used by VLC to provide the video stream from the video capture device. Default will be 8099 (default: '${K_DEFAULT_HTTP_PORT}')"
     printf '\t%s\n' "-h,--help: Prints help"
@@ -106,7 +109,7 @@ print_help ()
     printf '\t%s\n' "-m,--video-file-name-mask: Videos files record name. Files will be generated as: 1970-12-31_%00h00m00s_<yourvalue>  (default: '$K_DEFAULT_FILE_NAME_MASK')"
     printf '\t%s\n' "--video-files-split-after: Defines the unitary VLC record file duration in seconds. WARNING: Only necessary when output-videos-directory is used (default: '$K_DEFAULT_EACH_MOVIE_DURATION_SEC')"
     printf '\t%s\n' "--stop-stream-after: Defines the delay after which the VLC record will stop in seconds. WARNING: Only necessary when output-videos-directory is used (default: '$K_DEFAULT_GLOBAL_RECORD_TIMEOUT')"
-    printf '\t%s\n' "--use-ssmtp,--no-use-ssmtp: Send mail using SSMTP command (if exists) indicating start of record (off by default)"
+    printf '\t%s\n' "--use-msmtp,--no-use-msmtp: Send mail using msmtp indicating start of record. Set recipient via WEBCAM_STREAM_MAIL_TO env var. (off by default)"
     printf '\t%s\n' "--force-led-on,--no-force-led-on: Forces the Logitech C920 LED to be on. (off by default)"
     printf '\t%s\n' "--video-width: Force video format width. Use at your own risk. (default: '$K_DEFAULT_WIDTH')"
     printf '\t%s\n' "--video-height: Force video format height. Use at your own risk. (default: '$K_DEFAULT_HEIGHT')"
@@ -121,112 +124,79 @@ parse_commandline ()
     do
         _key="$1"
         case "$_key" in
-            # The help argurment doesn't accept a value,
-            # we expect the --help or -h, so we watch for them.
             -h|--help)
                 print_help
                 exit 0
                 ;;
-            # We support getopts-style short arguments clustering,
-            # so as -h doesn't accept value, other short options may be appended to it, so we watch for -h*.
-            # After stripping the leading -h from the argument, we have to make sure
-            # that the first character that follows coresponds to a short option.
             -h*)
                 print_help
                 exit 0
                 ;;
-            # We support whitespace as a delimiter between option argument and its value.
-            # Therefore, we expect the --output-videos-directory or -o value.
-            # so we watch for --output-videos-directory and -o.
-            # Since we know that we got the long or short option,
-            # we just reach out for the next argument to get the value.
             -o|--output-videos-directory)
                 test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
                 _arg_output_videos_directory="$2"
                 shift
                 ;;
-            # We support the = as a delimiter between option argument and its value.
-            # Therefore, we expect --output-videos-directory=value, so we watch for --output-videos-directory=*
-            # For whatever we get, we strip '--output-videos-directory=' using the ${var##--output-videos-directory=} notation
-            # to get the argument value
             --output-videos-directory=*)
                 _arg_output_videos_directory="${_key##--output-videos-directory=}"
                 ;;
-            # We support getopts-style short arguments grouping,
-            # so as -o accepts value, we allow it to be appended to it, so we watch for -o*
-            # and we strip the leading -o from the argument string using the ${var##-o} notation.
             -o*)
                 _arg_output_videos_directory="${_key##-o}"
                 ;;
-            # See the comment of option '--output-videos-directory' to see what's going on here - principle is the same.
             -m|--video-file-name-mask)
                 test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
                 _arg_video_file_name_mask="$2"
                 shift
                 ;;
-            # See the comment of option '--output-videos-directory=' to see what's going on here - principle is the same.
             --video-file-name-mask=*)
                 _arg_video_file_name_mask="${_key##--video-file-name-mask=}"
                 ;;
-            # See the comment of option '-o' to see what's going on here - principle is the same.
             -m*)
                 _arg_video_file_name_mask="${_key##-m}"
                 ;;
-            # See the comment of option '--output-videos-directory' to see what's going on here - principle is the same.
             --video-files-split-after)
                 test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
                 _arg_video_files_split_after="$2"
                 shift
                 ;;
-            # See the comment of option '--output-videos-directory=' to see what's going on here - principle is the same.
             --video-files-split-after=*)
                 _arg_video_files_split_after="${_key##--video-files-split-after=}"
                 ;;
-            # See the comment of option '--output-videos-directory' to see what's going on here - principle is the same.
             --stop-stream-after)
                 test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
                 _arg_stop_stream_after="$2"
                 shift
                 ;;
-            # See the comment of option '--output-videos-directory=' to see what's going on here - principle is the same.
             --stop-stream-after=*)
                 _arg_stop_stream_after="${_key##--stop-stream-after=}"
                 ;;
-            # See the comment of option '--help' to see what's going on here - principle is the same.
-            --no-use-ssmtp|--use-ssmtp)
+            --no-use-msmtp|--use-msmtp)
                 _arg_use_ssmtp="on"
                 test "${1:0:5}" = "--no-" && _arg_use_ssmtp="off"
                 ;;
-            # See the comment of option '--help' to see what's going on here - principle is the same.
             --no-force-led-on|--force-led-on)
                 _arg_force_led_on="on"
                 test "${1:0:5}" = "--no-" && _arg_force_led_on="off"
                 ;;
-            # See the comment of option '--output-videos-directory' to see what's going on here - principle is the same.
             --video-width)
                 test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
                 _arg_video_width="$2"
                 shift
                 ;;
-            # See the comment of option '--output-videos-directory=' to see what's going on here - principle is the same.
             --video-width=*)
                 _arg_video_width="${_key##--video-width=}"
                 ;;
-            # See the comment of option '--output-videos-directory' to see what's going on here - principle is the same.
             --video-height)
                 test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
                 _arg_video_height="$2"
                 shift
                 ;;
-            # See the comment of option '--output-videos-directory=' to see what's going on here - principle is the same.
             --video-height=*)
                 _arg_video_height="${_key##--video-height=}"
                 ;;
-            # See the comment of option '--help' to see what's going on here - principle is the same.
             -V|--verbose)
                 _arg_verbose=$((_arg_verbose + 1))
                 ;;
-            # See the comment of option '-h' to see what's going on here - principle is the same.
             -V*)
                 _arg_verbose=$((_arg_verbose + 1))
                 _next="${_key##-V}"
@@ -235,12 +205,10 @@ parse_commandline ()
                     begins_with_short_option "$_next" && shift && set -- "-V" "-${_next}" "$@" || die "The short option '$_key' can't be decomposed to ${_key:0:2} and -${_key:2}, because ${_key:0:2} doesn't accept value and '-${_key:2:1}' doesn't correspond to a short option."
                 fi
                 ;;
-            # See the comment of option '--help' to see what's going on here - principle is the same.
             -v|--version)
                 echo "Raspi VLC Webcam Stream v$version (designed for Logitech C920)"
                 exit 0
                 ;;
-            # See the comment of option '-h' to see what's going on here - principle is the same.
             -v*)
                 echo "Raspi VLC Webcam Stream v$version (designed for Logitech C920)"
                 exit 0
@@ -268,8 +236,6 @@ handle_passed_args_count ()
 # The 'eval' command is needed as the name of target variable is saved into another variable.
 assign_positional_args ()
 {
-    # We have an array of variables to which we want to save positional args values.
-    # This array is able to hold array elements as targets.
     _positional_names=('_arg_video_device_number' '_arg_http_port' )
 
     for (( ii = 0; ii < ${#_positionals[@]}; ii++))
@@ -278,34 +244,12 @@ assign_positional_args ()
     done
 }
 
-# Now call all the functions defined above that are needed to get the job done
 parse_commandline "$@"
 handle_passed_args_count
 assign_positional_args
 
-# OTHER STUFF GENERATED BY Argbash
-
 ### END OF CODE GENERATED BY Argbash (sortof) ### ])
 # [ <-- needed because of Argbash
-
-
-#echo "Value of first argument: $_arg_video_device_number"
-#echo "Value of second argument: $_arg_http_port"
-#echo "Value of third argument: $_arg_output_videos_directory"
-#
-#echo "Value of output-videos-directory  argument: $_arg_output_videos_directory"
-#echo "Value of video-file-name-mask argument: $_arg_video_file_name_mask"
-#echo "Value of video-files-split-afterargument: $_arg_video_files_split_after"
-#echo "Value of stop-stream-afterargument: $_arg_stop_stream_after"
-#echo "Value of use-ssmtp argument: $_arg_use_ssmtp"
-#
-#
-#echo "Value of force-led-on argument: $_arg_force_led_on"
-#echo "Value of video-width argument: $_arg_video_width"
-#echo "Value of video-height argument: $_arg_video_height"
-#echo "Value of _arg_verbose argument: $_arg_verbose"
-#
-# ] <-- needed because of Argbash
 
 
 
@@ -316,13 +260,11 @@ LED_COMMAND=
 VIDEO_DEVICE_NB=${_arg_video_device_number}
 
 EACH_MOVIE_DURATION_SEC=${_arg_video_files_split_after}
-#command timeout in sec
 GLOBAL_RECORD_TIMEOUT=${_arg_stop_stream_after}
 
 FILE_NAME_MASK=${_arg_video_file_name_mask}
 MOVIES_FOLDER=${_arg_output_videos_directory}
 
-#http port
 HTTP_PORT=${_arg_http_port}
 
 
@@ -340,68 +282,79 @@ function VLC_C920_STREAM {
 	VIDEO_DEVICE_NB=$1
 	HTTP_PORT=$2
 	MOVIES_FOLDER=$3
-	
+
 	FILE_NAME_PATTERN="%Y-%m-%d_%Hh%Mm%Ss_${FILE_NAME_MASK}.mp4"
 	VLC_FILE_DUPLICATE_ARG="standard{access=file,mux=mp4,dst='${MOVIES_FOLDER}/${FILE_NAME_PATTERN}'}"
 	VLC_HTTP_DUPLICATE_ARG="standard{access=http,mux=ts,mime=video/ts,dst=:${HTTP_PORT}}"
-	VLC_AUDIO_CAPTURE_CMD="transcode{acodec=mpga,ab=128,channels=2,samplerate=44100,threads=4,audio-sync=1}"
-	WEBCAM_DEVICE=/dev/video${VIDEO_DEVICE_NB}
-	MAIL_CMD=ssmtp
+	# mp4a (AAC) replaces mpga: better quality at same bitrate and spec-compliant in MP4 containers.
+	# 4 threads matches the RPi 4's quad-core CPU.
+	VLC_AUDIO_CAPTURE_CMD="transcode{acodec=mp4a,ab=128,channels=2,samplerate=44100,threads=4,audio-sync=1}"
+	MAIL_CMD=msmtp
 	VLC_PARAM_INFINITE_LOOP=${K_VLC_PARAM_INFINITE_LOOP_ACTIVATED}
-	
-	checkCommandExists ${MAIL_CMD} ${ERROR_MAIL}
-	checkCommandExists v4l2-ctl ${ERROR_V4L2_CTL}
-	checkCommandExists vlc ${ERROR_VLC}
-	
-	if [ ${_arg_use_ssmtp} != "off" ] ; then 
-		echo -e "Starting VLC stream and record\nDate: $(date)\nVIDEO_DEVICE_NB: ${VIDEO_DEVICE_NB}\nDuration: ${GLOBAL_RECORD_TIMEOUT}\nVLC_PARAM_INFINITE_LOOP: ${VLC_PARAM_INFINITE_LOOP}\nFile duration: ${EACH_MOVIE_DURATION_SEC}" | ${MAIL_CMD} -vvv your_adress_mail_here@somewhere.com
-	#else
-		#msg="Folder ${MOVIES_FOLDER} passed in argument is invalid or does not exist. Aborting.";
-		#displayErrorMessage "${ERROR_FOLDER_DOES_NOT_EXIST}" "$msg"
+
+	# Only require the mail tool when the feature is actually requested
+	if [ "${_arg_use_ssmtp}" != "off" ] ; then
+		checkCommandExists "${MAIL_CMD}" "${ERROR_MAIL}"
 	fi
-	
-	# force video format + led off
-	if [ ${_arg_force_led_on} != "off" ] ; then 
-		LED_COMMAND=K_LED_ON
+	checkCommandExists v4l2-ctl "${ERROR_V4L2_CTL}"
+	checkCommandExists vlc "${ERROR_VLC}"
+
+	if [ "${_arg_use_ssmtp}" != "off" ] ; then
+		if [ -z "${K_DEFAULT_MAIL_RECIPIENT}" ] ; then
+			displayErrorMessage "${ERROR_MAIL}" "No mail recipient set. Export WEBCAM_STREAM_MAIL_TO=your@email.com before running."
+		fi
+		echo -e "Starting VLC stream and record\nDate: $(date)\nVIDEO_DEVICE_NB: ${VIDEO_DEVICE_NB}\nDuration: ${GLOBAL_RECORD_TIMEOUT}\nVLC_PARAM_INFINITE_LOOP: ${VLC_PARAM_INFINITE_LOOP}\nFile duration: ${EACH_MOVIE_DURATION_SEC}" \
+			| "${MAIL_CMD}" "${K_DEFAULT_MAIL_RECIPIENT}"
+	fi
+
+	if [ "${_arg_force_led_on}" != "off" ] ; then
+		LED_COMMAND="${K_LED_ON}"
 	else
-		LED_COMMAND=K_LED_OFF
+		LED_COMMAND="${K_LED_OFF}"
 	fi
-	
-	v4l2-ctl -d"${VIDEO_DEVICE_NB}" --set-fmt-video=width="${WIDTH}",height="${HEIGHT}",pixelformat=1 --set-ctrl=led1_mode=${LED_COMMAND}
-	
-	if [ -z "${MOVIES_FOLDER}" ] ; then 
+
+	# pixelformat=H264 requests native H264 output from the C920, consistent with chroma=h264 below.
+	# The original pixelformat=1 (YUYV raw) contradicted the H264 chroma setting.
+	v4l2-ctl -d "${VIDEO_DEVICE_NB}" \
+		--set-fmt-video=width="${WIDTH}",height="${HEIGHT}",pixelformat=H264 \
+		--set-ctrl=led1_mode="${LED_COMMAND}"
+
+	if [ -n "${MOVIES_FOLDER}" ] ; then
 		if [ -d "${MOVIES_FOLDER}" ] ; then
-			# DO THE VLC STREAMING + RECORD
-			# --alsa-audio-device default  is a pulseaudio workaround
+			# Stream to HTTP and simultaneously record to split MP4 files.
+			# --avcodec-hw=any        use RPi 4 VideoCore VI V4L2 M2M hardware codec where possible
+			# --network-caching=1000  1 s output buffer smooths the HTTP TS stream on Gigabit Ethernet
+			# pulse://                audio input via PipeWire's PulseAudio compat layer (Bookworm default),
+			#                         replacing the brittle alsa://hw:1,0 hardware index
 			timeout "${GLOBAL_RECORD_TIMEOUT}"s \
-			cvlc --alsa-audio-device default \
-			--sout-file-format \
-			--run-time="${EACH_MOVIE_DURATION_SEC}"\
-			"${VLC_PARAM_INFINITE_LOOP}" \
-			v4l2:///dev/video"${VIDEO_DEVICE_NB}":chroma=h264 :input-slave=alsa://hw:1,0 \
-			--sout \
-			"#${VLC_AUDIO_CAPTURE_CMD}:duplicate{dst=${VLC_FILE_DUPLICATE_ARG}:dst=${VLC_HTTP_DUPLICATE_ARG}}"
+			cvlc \
+				--avcodec-hw=any \
+				--network-caching=1000 \
+				--sout-file-format \
+				--run-time="${EACH_MOVIE_DURATION_SEC}" \
+				"${VLC_PARAM_INFINITE_LOOP}" \
+				"v4l2:///dev/video${VIDEO_DEVICE_NB}:chroma=h264:fps=${K_DEFAULT_FPS}" \
+				":input-slave=pulse://" \
+				--sout \
+				"#${VLC_AUDIO_CAPTURE_CMD}:duplicate{dst=${VLC_FILE_DUPLICATE_ARG}:dst=${VLC_HTTP_DUPLICATE_ARG}}"
 		else
-			#echo >&2 "Folder ${MOVIES_FOLDER} passed in argument is invalid or does not exist.  Aborting."
-			msg="Folder ${MOVIES_FOLDER} passed in argument is invalid or does not exist. Aborting.";
+			msg="Folder ${MOVIES_FOLDER} passed in argument is invalid or does not exist. Aborting."
 			displayErrorMessage "${ERROR_FOLDER_DOES_NOT_EXIST}" "$msg"
-			#exit ${ERROR_FOLDER_DOES_NOT_EXIST}
 		fi
 	else
-		# DO THE VLC STREAMING
-		# --alsa-audio-device default  is a pulseaudio workaround
-		timeout "${GLOBAL_RECORD_TIMEOUT}"s \
-		cvlc --alsa-audio-device default \
-		--run-time="${EACH_MOVIE_DURATION_SEC}"\
-		"${VLC_PARAM_INFINITE_LOOP}" \
-		v4l2:///dev/video"${VIDEO_DEVICE_NB}":chroma=h264 :input-slave=alsa://hw:1,0 \
-		--sout \
-		"#${VLC_AUDIO_CAPTURE_CMD}:${VLC_HTTP_DUPLICATE_ARG}"
+		# Stream only — no timeout so the stream runs until manually stopped.
+		cvlc \
+			--avcodec-hw=any \
+			--network-caching=1000 \
+			"${VLC_PARAM_INFINITE_LOOP}" \
+			"v4l2:///dev/video${VIDEO_DEVICE_NB}:chroma=h264:fps=${K_DEFAULT_FPS}" \
+			":input-slave=pulse://" \
+			--sout \
+			"#${VLC_AUDIO_CAPTURE_CMD}:${VLC_HTTP_DUPLICATE_ARG}"
 	fi
 }
 
 function checkCommandExists {
-	#command -v ${1} >/dev/null 2>&1 || { echo >&2 "Error [${2}]: I require ${1} but it's not installed.  Aborting."; exit ${2}; }
 	command -v "${1}" >/dev/null 2>&1 || { msg="I require ${1} but it's not installed. Aborting."; displayErrorMessage "${2}" "$msg" ;}
 }
 
@@ -413,16 +366,12 @@ function displayErrorMessage {
 }
 
 
-if [ -f "${WEBCAM_DEVICE}" ] ; then
+# /dev/videoN is a character device, not a regular file; -f would always return false here.
+if [ -c "${WEBCAM_DEVICE}" ] ; then
 	VLC_C920_STREAM "${VIDEO_DEVICE_NB}" "${HTTP_PORT}" "${MOVIES_FOLDER}"
 else
-	#
 	message="Device ${WEBCAM_DEVICE} required but could not be found. Aborting."
-	displayErrorMessage ${ERROR_WEBCAM_DOES_NOT_EXIST}  "${message}"
-	#
-	#echo
-	#echo >&2 "Device ${WEBCAM_DEVICE} required but could not be found. Aborting."
-	#echo
-	#exit ${ERROR_WEBCAM_DOES_NOT_EXIST}
-	#
+	displayErrorMessage "${ERROR_WEBCAM_DOES_NOT_EXIST}" "${message}"
 fi
+
+# ] <-- needed because of Argbash
