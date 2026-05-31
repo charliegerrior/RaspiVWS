@@ -1,0 +1,12 @@
+[Unit]
+Description=Raspberry Pi VLC Webcam Stream (on-demand)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/home/charlie/RaspiVWS/raspi-vws-proxy.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
