@@ -64,6 +64,7 @@ def _start_vlc():
         [SCRIPT, '0', str(INTERNAL_PORT)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
     _idle_since = None
 
@@ -87,12 +88,18 @@ def _stop_vlc():
     global _vlc_proc, _idle_since
     if _vlc_proc is not None and _vlc_proc.poll() is None:
         log.info('Stopping VLC (idle for %ds)', IDLE_TIMEOUT)
-        _vlc_proc.terminate()
+        try:
+            os.killpg(_vlc_proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
         try:
             _vlc_proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             log.warning('VLC did not exit cleanly; killing')
-            _vlc_proc.kill()
+            try:
+                os.killpg(_vlc_proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
     _vlc_proc = None
     _idle_since = None
 
