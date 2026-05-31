@@ -300,6 +300,9 @@ function VLC_C920_STREAM {
 	# interval so clients can connect quickly without waiting for the default 10 s GOP.
 	VLC_VIDEO_TRANSCODE="vcodec=h264,vb=4000,scale=1,venc=avcodec"
 	MAIL_CMD=msmtp
+	# VLC 3.x passes legacy MPEG avcodec options that the V4L2 M2M encoder doesn't support,
+	# and always warns about missing GUI modules in headless mode. Filter both from stderr.
+	VLC_STDERR_FILTER='no suitable interface module|globalhotkeys|dummy interface: using|Unknown option "(border_mask|noise_reduction|lmin|lmax|qsquish|rc_buffer_aggressivity)"'
 
 	if [ "${_arg_with_audio}" != "off" ]; then
 		VLC_INPUT_SLAVE=":input-slave=pulse://"
@@ -353,7 +356,8 @@ function VLC_C920_STREAM {
 				"v4l2:///dev/video${VIDEO_DEVICE_NB}:chroma=MJPG:width=${WIDTH}:height=${HEIGHT}:fps=${K_DEFAULT_FPS}" \
 				${VLC_INPUT_SLAVE:+"${VLC_INPUT_SLAVE}"} \
 				--sout \
-				"${VLC_SOUT_PREFIX}duplicate{dst=${VLC_FILE_DUPLICATE_ARG}:dst=${VLC_HTTP_DUPLICATE_ARG}}"
+				"${VLC_SOUT_PREFIX}duplicate{dst=${VLC_FILE_DUPLICATE_ARG}:dst=${VLC_HTTP_DUPLICATE_ARG}}" \
+				2> >(grep -Ev "${VLC_STDERR_FILTER}" >&2)
 		else
 			msg="Folder ${MOVIES_FOLDER} passed in argument is invalid or does not exist. Aborting."
 			displayErrorMessage "${ERROR_FOLDER_DOES_NOT_EXIST}" "$msg"
@@ -369,7 +373,8 @@ function VLC_C920_STREAM {
 			"v4l2:///dev/video${VIDEO_DEVICE_NB}:chroma=MJPG:width=${WIDTH}:height=${HEIGHT}:fps=${K_DEFAULT_FPS}" \
 			${VLC_INPUT_SLAVE:+"${VLC_INPUT_SLAVE}"} \
 			--sout \
-			"${VLC_SOUT_PREFIX}${VLC_HTTP_DUPLICATE_ARG}"
+			"${VLC_SOUT_PREFIX}${VLC_HTTP_DUPLICATE_ARG}" \
+			2> >(grep -Ev "${VLC_STDERR_FILTER}" >&2)
 	fi
 }
 
