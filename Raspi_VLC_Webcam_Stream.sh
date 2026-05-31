@@ -313,6 +313,16 @@ function VLC_C920_STREAM {
 	fi
 	VLC_PARAM_INFINITE_LOOP=${K_VLC_PARAM_INFINITE_LOOP_ACTIVATED}
 
+	log INFO "Device:     /dev/video${VIDEO_DEVICE_NB}"
+	log INFO "Resolution: ${WIDTH}x${HEIGHT} @ ${K_DEFAULT_FPS} fps"
+	log INFO "HTTP port:  ${HTTP_PORT}"
+	if [ -n "${MOVIES_FOLDER}" ] ; then
+		log INFO "Mode:       stream + record | output=${MOVIES_FOLDER} split=${EACH_MOVIE_DURATION_SEC}s timeout=${GLOBAL_RECORD_TIMEOUT}s"
+	else
+		log INFO "Mode:       stream only"
+	fi
+	log INFO "Audio:      ${_arg_with_audio}"
+
 	# Only require the mail tool when the feature is actually requested
 	if [ "${_arg_use_ssmtp}" != "off" ] ; then
 		checkCommandExists "${MAIL_CMD}" "${ERROR_MAIL}"
@@ -334,6 +344,7 @@ function VLC_C920_STREAM {
 		LED_COMMAND="${K_LED_OFF}"
 	fi
 
+	log INFO "Configuring camera controls"
 	# led1_mode is not supported on all C920 firmware/kernel combinations; suppress the error.
 	v4l2-ctl -d "${VIDEO_DEVICE_NB}" --set-ctrl=led1_mode="${LED_COMMAND}" 2>/dev/null || true
 	# Disable dynamic framerate: the camera lowers FPS in low light to allow longer exposure,
@@ -345,16 +356,15 @@ function VLC_C920_STREAM {
 			# Stream to HTTP and simultaneously record to split MP4 files.
 			# --avcodec-hw=any    use RPi 4 VideoCore VI V4L2 M2M hardware codec where possible
 			# --live-caching=0    no app-level input buffer; v4l2 kernel buffers are sufficient
-			# --clock-jitter=0    disable timestamp-jitter compensation (avoids frame drops/repeats)
 			# pulse://            audio input via PipeWire's PulseAudio compat layer (Bookworm default),
 			#                     replacing the brittle alsa://hw:1,0 hardware index
+			log INFO "Starting VLC (stream + record, timeout=${GLOBAL_RECORD_TIMEOUT}s)"
 			timeout "${GLOBAL_RECORD_TIMEOUT}"s \
 			cvlc \
 				--avcodec-hw=any \
 				--sout-avcodec-codec=h264_v4l2m2m \
 				--sout-avcodec-keyint=30 \
 				--live-caching=0 \
-				--clock-jitter=0 \
 				--sout-file-format \
 				--run-time="${EACH_MOVIE_DURATION_SEC}" \
 				"${VLC_PARAM_INFINITE_LOOP}" \
@@ -363,25 +373,40 @@ function VLC_C920_STREAM {
 				--sout \
 				"${VLC_SOUT_PREFIX}duplicate{dst=${VLC_FILE_DUPLICATE_ARG}:dst=${VLC_HTTP_DUPLICATE_ARG}}" \
 				2> >(grep -Ev "${VLC_STDERR_FILTER}" >&2)
+			vlc_exit=$?
+			if [ "${vlc_exit}" -eq 124 ] ; then
+				log INFO "VLC stopped after ${GLOBAL_RECORD_TIMEOUT}s timeout"
+			elif [ "${vlc_exit}" -eq 0 ] ; then
+				log INFO "VLC exited cleanly"
+			else
+				log WARN "VLC exited with code ${vlc_exit}"
+			fi
 		else
 			msg="Folder ${MOVIES_FOLDER} passed in argument is invalid or does not exist. Aborting."
 			displayErrorMessage "${ERROR_FOLDER_DOES_NOT_EXIST}" "$msg"
 		fi
 	else
 		# Stream only — no timeout so the stream runs until manually stopped.
+		log INFO "Starting VLC (stream only, Ctrl-C to stop)"
 		cvlc \
 			--avcodec-hw=any \
 			--sout-avcodec-codec=h264_v4l2m2m \
 			--sout-avcodec-keyint=30 \
 			--live-caching=0 \
-			--clock-jitter=0 \
 			"${VLC_PARAM_INFINITE_LOOP}" \
 			"v4l2:///dev/video${VIDEO_DEVICE_NB}:chroma=MJPG:width=${WIDTH}:height=${HEIGHT}:fps=${K_DEFAULT_FPS}" \
 			${VLC_INPUT_SLAVE:+"${VLC_INPUT_SLAVE}"} \
 			--sout \
 			"${VLC_SOUT_PREFIX}${VLC_HTTP_DUPLICATE_ARG}" \
 			2> >(grep -Ev "${VLC_STDERR_FILTER}" >&2)
+		log INFO "VLC exited with code $?"
 	fi
+}
+
+function log {
+	local level=$1
+	shift
+	echo "[$(date '+%Y-%m-%d %H:%M:%S')] [${level}] $*"
 }
 
 function checkCommandExists {
@@ -389,9 +414,7 @@ function checkCommandExists {
 }
 
 function displayErrorMessage {
-	echo
-	echo >&2 "Error [${1}]: ${2}"
-	echo
+	log ERROR "[${1}] ${2}"
 	exit "$1"
 }
 
