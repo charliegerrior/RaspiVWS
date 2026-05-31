@@ -35,6 +35,7 @@ readonly K_DEFAULT_MAIL_RECIPIENT="${WEBCAM_STREAM_MAIL_TO:-}"
 # ARG_OPTIONAL_SINGLE([stop-stream-after],[],[Defines the delay after which the VLC record will stop in seconds. WARNING: Only necessary when output-videos-directory is used],[$K_DEFAULT_GLOBAL_RECORD_TIMEOUT])
 
 # ARG_OPTIONAL_BOOLEAN([use-msmtp],[],[Send mail using msmtp indicating start of record. Set recipient via WEBCAM_STREAM_MAIL_TO env var.])
+# ARG_OPTIONAL_BOOLEAN([with-audio],[],[Enable microphone/audio capture in stream and recordings. Off by default.])
 # ARG_OPTIONAL_BOOLEAN([force-led-on],[],[Forces the Logitech C920 LED to be on.])
 
 # ARG_OPTIONAL_SINGLE([video-width],[],[Force video format width. Use at your own risk.],[$K_DEFAULT_WIDTH])
@@ -91,6 +92,7 @@ _arg_video_file_name_mask="${K_DEFAULT_FILE_NAME_MASK}"
 _arg_video_files_split_after="$K_DEFAULT_EACH_MOVIE_DURATION_SEC"
 _arg_stop_stream_after="$K_DEFAULT_GLOBAL_RECORD_TIMEOUT"
 _arg_use_ssmtp="off"
+_arg_with_audio="off"
 _arg_force_led_on="off"
 _arg_video_width="${K_DEFAULT_WIDTH}"
 _arg_video_height="$K_DEFAULT_HEIGHT"
@@ -110,6 +112,7 @@ print_help ()
     printf '\t%s\n' "--video-files-split-after: Defines the unitary VLC record file duration in seconds. WARNING: Only necessary when output-videos-directory is used (default: '$K_DEFAULT_EACH_MOVIE_DURATION_SEC')"
     printf '\t%s\n' "--stop-stream-after: Defines the delay after which the VLC record will stop in seconds. WARNING: Only necessary when output-videos-directory is used (default: '$K_DEFAULT_GLOBAL_RECORD_TIMEOUT')"
     printf '\t%s\n' "--use-msmtp,--no-use-msmtp: Send mail using msmtp indicating start of record. Set recipient via WEBCAM_STREAM_MAIL_TO env var. (off by default)"
+    printf '\t%s\n' "--with-audio,--no-with-audio: Enable microphone/audio capture in stream and recordings. (off by default)"
     printf '\t%s\n' "--force-led-on,--no-force-led-on: Forces the Logitech C920 LED to be on. (off by default)"
     printf '\t%s\n' "--video-width: Force video format width. Use at your own risk. (default: '$K_DEFAULT_WIDTH')"
     printf '\t%s\n' "--video-height: Force video format height. Use at your own risk. (default: '$K_DEFAULT_HEIGHT')"
@@ -173,6 +176,10 @@ parse_commandline ()
             --no-use-msmtp|--use-msmtp)
                 _arg_use_ssmtp="on"
                 test "${1:0:5}" = "--no-" && _arg_use_ssmtp="off"
+                ;;
+            --no-with-audio|--with-audio)
+                _arg_with_audio="on"
+                test "${1:0:5}" = "--no-" && _arg_with_audio="off"
                 ;;
             --no-force-led-on|--force-led-on)
                 _arg_force_led_on="on"
@@ -286,10 +293,22 @@ function VLC_C920_STREAM {
 	FILE_NAME_PATTERN="%Y-%m-%d_%Hh%Mm%Ss_${FILE_NAME_MASK}.mp4"
 	VLC_FILE_DUPLICATE_ARG="standard{access=file,mux=mp4,dst='${MOVIES_FOLDER}/${FILE_NAME_PATTERN}'}"
 	VLC_HTTP_DUPLICATE_ARG="standard{access=http,mux=ts,mime=video/ts,dst=:${HTTP_PORT}}"
-	# mp4a (AAC) replaces mpga: better quality at same bitrate and spec-compliant in MP4 containers.
+	# C920 on this kernel exposes MJPG and YUYV only (no native H264 via UVC).
+	# MJPG supports 1920x1080@30fps; YUYV tops out at 5fps at that resolution.
+	# VLC transcodes MJPG → H264 for the output stream/recordings.
 	# 4 threads matches the RPi 4's quad-core CPU.
-	VLC_AUDIO_CAPTURE_CMD="transcode{acodec=mp4a,ab=128,channels=2,samplerate=44100,threads=4,audio-sync=1}"
+	# keyint=30 forces a keyframe every second (at 30fps), so clients can connect quickly.
+	# bframes=0 eliminates encoder delay; tune=zerolatency keeps the pipeline low-latency.
+	VLC_VIDEO_TRANSCODE="vcodec=h264,vb=4000,scale=1,threads=4,venc=x264{keyint=30,bframes=0,tune=zerolatency}"
 	MAIL_CMD=msmtp
+
+	if [ "${_arg_with_audio}" != "off" ]; then
+		VLC_INPUT_SLAVE=":input-slave=pulse://"
+		VLC_SOUT_PREFIX="#transcode{${VLC_VIDEO_TRANSCODE},acodec=mp4a,ab=128,channels=2,samplerate=44100,threads=4,audio-sync=1}:"
+	else
+		VLC_INPUT_SLAVE=""
+		VLC_SOUT_PREFIX="#transcode{${VLC_VIDEO_TRANSCODE}}:"
+	fi
 	VLC_PARAM_INFINITE_LOOP=${K_VLC_PARAM_INFINITE_LOOP_ACTIVATED}
 
 	# Only require the mail tool when the feature is actually requested
@@ -313,11 +332,8 @@ function VLC_C920_STREAM {
 		LED_COMMAND="${K_LED_OFF}"
 	fi
 
-	# pixelformat=H264 requests native H264 output from the C920, consistent with chroma=h264 below.
-	# The original pixelformat=1 (YUYV raw) contradicted the H264 chroma setting.
-	v4l2-ctl -d "${VIDEO_DEVICE_NB}" \
-		--set-fmt-video=width="${WIDTH}",height="${HEIGHT}",pixelformat=H264 \
-		--set-ctrl=led1_mode="${LED_COMMAND}"
+	# led1_mode is not supported on all C920 firmware/kernel combinations; suppress the error.
+	v4l2-ctl -d "${VIDEO_DEVICE_NB}" --set-ctrl=led1_mode="${LED_COMMAND}" 2>/dev/null || true
 
 	if [ -n "${MOVIES_FOLDER}" ] ; then
 		if [ -d "${MOVIES_FOLDER}" ] ; then
@@ -333,10 +349,10 @@ function VLC_C920_STREAM {
 				--sout-file-format \
 				--run-time="${EACH_MOVIE_DURATION_SEC}" \
 				"${VLC_PARAM_INFINITE_LOOP}" \
-				"v4l2:///dev/video${VIDEO_DEVICE_NB}:chroma=h264:fps=${K_DEFAULT_FPS}" \
-				":input-slave=pulse://" \
+				"v4l2:///dev/video${VIDEO_DEVICE_NB}:chroma=MJPG:width=${WIDTH}:height=${HEIGHT}:fps=${K_DEFAULT_FPS}" \
+				${VLC_INPUT_SLAVE:+"${VLC_INPUT_SLAVE}"} \
 				--sout \
-				"#${VLC_AUDIO_CAPTURE_CMD}:duplicate{dst=${VLC_FILE_DUPLICATE_ARG}:dst=${VLC_HTTP_DUPLICATE_ARG}}"
+				"${VLC_SOUT_PREFIX}duplicate{dst=${VLC_FILE_DUPLICATE_ARG}:dst=${VLC_HTTP_DUPLICATE_ARG}}"
 		else
 			msg="Folder ${MOVIES_FOLDER} passed in argument is invalid or does not exist. Aborting."
 			displayErrorMessage "${ERROR_FOLDER_DOES_NOT_EXIST}" "$msg"
@@ -347,10 +363,10 @@ function VLC_C920_STREAM {
 			--avcodec-hw=any \
 			--network-caching=1000 \
 			"${VLC_PARAM_INFINITE_LOOP}" \
-			"v4l2:///dev/video${VIDEO_DEVICE_NB}:chroma=h264:fps=${K_DEFAULT_FPS}" \
-			":input-slave=pulse://" \
+			"v4l2:///dev/video${VIDEO_DEVICE_NB}:chroma=MJPG:width=${WIDTH}:height=${HEIGHT}:fps=${K_DEFAULT_FPS}" \
+			${VLC_INPUT_SLAVE:+"${VLC_INPUT_SLAVE}"} \
 			--sout \
-			"#${VLC_AUDIO_CAPTURE_CMD}:${VLC_HTTP_DUPLICATE_ARG}"
+			"${VLC_SOUT_PREFIX}${VLC_HTTP_DUPLICATE_ARG}"
 	fi
 }
 
