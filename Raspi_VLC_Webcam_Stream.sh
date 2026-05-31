@@ -295,11 +295,10 @@ function VLC_C920_STREAM {
 	VLC_HTTP_DUPLICATE_ARG="standard{access=http,mux=ts,mime=video/ts,dst=:${HTTP_PORT}}"
 	# C920 on this kernel exposes MJPG and YUYV only (no native H264 via UVC).
 	# MJPG supports 1920x1080@30fps; YUYV tops out at 5fps at that resolution.
-	# VLC transcodes MJPG → H264 for the output stream/recordings.
-	# 4 threads matches the RPi 4's quad-core CPU.
-	# keyint=30 forces a keyframe every second (at 30fps), so clients can connect quickly.
-	# bframes=0 eliminates encoder delay; tune=zerolatency keeps the pipeline low-latency.
-	VLC_VIDEO_TRANSCODE="vcodec=h264,vb=4000,scale=1,threads=4,venc=x264{keyint=30,bframes=0,tune=zerolatency}"
+	# VLC transcodes MJPG → H264 using the RPi 4 BCM2835 hardware encoder via V4L2 M2M.
+	# --sout-avcodec-codec selects the hw encoder; --sout-avcodec-keyint sets a 1 s keyframe
+	# interval so clients can connect quickly without waiting for the default 10 s GOP.
+	VLC_VIDEO_TRANSCODE="vcodec=h264,vb=4000,scale=1,venc=avcodec"
 	MAIL_CMD=msmtp
 
 	if [ "${_arg_with_audio}" != "off" ]; then
@@ -345,6 +344,8 @@ function VLC_C920_STREAM {
 			timeout "${GLOBAL_RECORD_TIMEOUT}"s \
 			cvlc \
 				--avcodec-hw=any \
+				--sout-avcodec-codec=h264_v4l2m2m \
+				--sout-avcodec-keyint=30 \
 				--network-caching=1000 \
 				--sout-file-format \
 				--run-time="${EACH_MOVIE_DURATION_SEC}" \
@@ -361,6 +362,8 @@ function VLC_C920_STREAM {
 		# Stream only — no timeout so the stream runs until manually stopped.
 		cvlc \
 			--avcodec-hw=any \
+			--sout-avcodec-codec=h264_v4l2m2m \
+			--sout-avcodec-keyint=30 \
 			--network-caching=1000 \
 			"${VLC_PARAM_INFINITE_LOOP}" \
 			"v4l2:///dev/video${VIDEO_DEVICE_NB}:chroma=MJPG:width=${WIDTH}:height=${HEIGHT}:fps=${K_DEFAULT_FPS}" \
