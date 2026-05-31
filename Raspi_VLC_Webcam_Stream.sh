@@ -336,20 +336,25 @@ function VLC_C920_STREAM {
 
 	# led1_mode is not supported on all C920 firmware/kernel combinations; suppress the error.
 	v4l2-ctl -d "${VIDEO_DEVICE_NB}" --set-ctrl=led1_mode="${LED_COMMAND}" 2>/dev/null || true
+	# Disable dynamic framerate: the camera lowers FPS in low light to allow longer exposure,
+	# which causes VLC to receive frames at inconsistent intervals and stutter.
+	v4l2-ctl -d "${VIDEO_DEVICE_NB}" --set-ctrl=exposure_dynamic_framerate=0 2>/dev/null || true
 
 	if [ -n "${MOVIES_FOLDER}" ] ; then
 		if [ -d "${MOVIES_FOLDER}" ] ; then
 			# Stream to HTTP and simultaneously record to split MP4 files.
-			# --avcodec-hw=any        use RPi 4 VideoCore VI V4L2 M2M hardware codec where possible
-			# --network-caching=1000  1 s output buffer smooths the HTTP TS stream on Gigabit Ethernet
-			# pulse://                audio input via PipeWire's PulseAudio compat layer (Bookworm default),
-			#                         replacing the brittle alsa://hw:1,0 hardware index
+			# --avcodec-hw=any    use RPi 4 VideoCore VI V4L2 M2M hardware codec where possible
+			# --live-caching=0    no app-level input buffer; v4l2 kernel buffers are sufficient
+			# --clock-jitter=0    disable timestamp-jitter compensation (avoids frame drops/repeats)
+			# pulse://            audio input via PipeWire's PulseAudio compat layer (Bookworm default),
+			#                     replacing the brittle alsa://hw:1,0 hardware index
 			timeout "${GLOBAL_RECORD_TIMEOUT}"s \
 			cvlc \
 				--avcodec-hw=any \
 				--sout-avcodec-codec=h264_v4l2m2m \
 				--sout-avcodec-keyint=30 \
-				--network-caching=1000 \
+				--live-caching=0 \
+				--clock-jitter=0 \
 				--sout-file-format \
 				--run-time="${EACH_MOVIE_DURATION_SEC}" \
 				"${VLC_PARAM_INFINITE_LOOP}" \
@@ -368,7 +373,8 @@ function VLC_C920_STREAM {
 			--avcodec-hw=any \
 			--sout-avcodec-codec=h264_v4l2m2m \
 			--sout-avcodec-keyint=30 \
-			--network-caching=1000 \
+			--live-caching=0 \
+			--clock-jitter=0 \
 			"${VLC_PARAM_INFINITE_LOOP}" \
 			"v4l2:///dev/video${VIDEO_DEVICE_NB}:chroma=MJPG:width=${WIDTH}:height=${HEIGHT}:fps=${K_DEFAULT_FPS}" \
 			${VLC_INPUT_SLAVE:+"${VLC_INPUT_SLAVE}"} \
