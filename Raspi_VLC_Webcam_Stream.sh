@@ -345,8 +345,12 @@ function VLC_C920_STREAM {
 	fi
 
 	log INFO "Configuring camera controls"
-	# led1_mode is not supported on all C920 firmware/kernel combinations; suppress the error.
+	# led1_mode via v4l2-ctl works on older kernels/firmware; silently ignore on newer ones.
 	v4l2-ctl -d "${VIDEO_DEVICE_NB}" --set-ctrl=led1_mode="${LED_COMMAND}" 2>/dev/null || true
+	# C920 PRO (0x08e5) and other V3 firmware cameras expose the LED through a UVC
+	# extension unit that is not wired up as a v4l2 control on kernel 6.x.
+	# c920_led.py reaches it directly via UVCIOC_CTRL_QUERY.
+	python3 "$(dirname "$0")/c920_led.py" "${VIDEO_DEVICE_NB}" "${LED_COMMAND}" 2>/dev/null || true
 	# Disable dynamic framerate: the camera lowers FPS in low light to allow longer exposure,
 	# which causes VLC to receive frames at inconsistent intervals and stutter.
 	v4l2-ctl -d "${VIDEO_DEVICE_NB}" --set-ctrl=exposure_dynamic_framerate=0 2>/dev/null || true
