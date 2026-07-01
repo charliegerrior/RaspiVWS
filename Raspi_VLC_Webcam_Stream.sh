@@ -7,8 +7,8 @@ readonly K_LED_OFF=0
 readonly K_LED_ON=1
 readonly K_VLC_PARAM_INFINITE_LOOP_ACTIVATED=--loop
 readonly K_VLC_PARAM_INFINITE_LOOP_DEACTIVATED=
-readonly K_DEFAULT_WIDTH=1920
-readonly K_DEFAULT_HEIGHT=1080
+readonly K_DEFAULT_WIDTH=1280
+readonly K_DEFAULT_HEIGHT=720
 readonly K_DEFAULT_HTTP_PORT=8099
 readonly K_DEFAULT_EACH_MOVIE_DURATION_SEC=120
 readonly K_DEFAULT_GLOBAL_RECORD_TIMEOUT=10800
@@ -295,7 +295,12 @@ function VLC_C920_STREAM {
 	VLC_HTTP_DUPLICATE_ARG="standard{access=http,mux=ts,mime=video/ts,dst=:${HTTP_PORT}}"
 	# C920 on this kernel exposes MJPG and YUYV only (no native H264 via UVC).
 	# MJPG supports 1920x1080@30fps; YUYV tops out at 5fps at that resolution.
-	# VLC transcodes MJPG → H264 using the RPi 4 BCM2835 hardware encoder via V4L2 M2M.
+	# VLC transcodes MJPG → H264 using the RPi 4 BCM2835 hardware encoder via V4L2 M2M,
+	# but the MJPG decode side is software/single-threaded and can't sustain 1080p30 in
+	# real time on this SoC (falls behind ~0.6x realtime, backlog grows unbounded).
+	# 1280x720@30fps is the default because it's the largest size that decodes in real
+	# time (verified: mux lag stays <250ms indefinitely). Override via --video-width/
+	# --video-height at your own risk of growing latency.
 	# --sout-avcodec-codec selects the hw encoder; --sout-avcodec-keyint sets a 1 s keyframe
 	# interval so clients can connect quickly without waiting for the default 10 s GOP.
 	VLC_VIDEO_TRANSCODE="vcodec=h264,vb=4000,scale=1,venc=avcodec"

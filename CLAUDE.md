@@ -50,7 +50,7 @@ The script has two distinct sections:
 | Parameter | Default |
 |-----------|---------|
 | HTTP port | 8099 |
-| Resolution | 1920×1080 |
+| Resolution | 1280×720 (1080p30 exceeds the Pi 4's software MJPEG-decode throughput and falls behind realtime; override via `--video-width`/`--video-height` at the cost of growing latency) |
 | FPS | 30 |
 | Per-file duration | 120 s |
 | Global record timeout | 10800 s (3 h) |

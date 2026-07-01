@@ -96,8 +96,8 @@ Usage: ./Raspi_VLC_Webcam_Stream.sh [-h|--help] [-o|--output-videos-directory <a
 	--stop-stream-after: Defines the delay after which the VLC record will stop in seconds. WARNING: Only necessary when output-videos-directory is used (default: '10800')
 	--use-msmtp,--no-use-msmtp: Send mail using msmtp indicating start of record. Set recipient via WEBCAM_STREAM_MAIL_TO env var. (off by default)
 	--force-led-on,--no-force-led-on: Forces the Logitech C920 LED to be on. (off by default)
-	--video-width: Force video format width. Use at your own risk. (default: '1920')
-	--video-height: Force video format height. Use at your own risk. (default: '1080')
+	--video-width: Force video format width. Use at your own risk. (default: '1280')
+	--video-height: Force video format height. Use at your own risk. (default: '720')
 	-V,--verbose: Console output verbosity. Controls both this command and underlying VLC verbosity.
 	-v,--version: Prints version
   ```
